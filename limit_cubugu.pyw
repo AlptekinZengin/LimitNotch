@@ -272,6 +272,61 @@ def monitorleri_listele(kok=None):
     }]
 
 
+GWL_EXSTYLE = -20
+WS_EX_TOOLWINDOW = 0x00000080
+WS_EX_APPWINDOW = 0x00040000
+SWP_NOZORDER = 0x0004
+SWP_FRAMECHANGED = 0x0020
+SW_HIDE = 0
+SW_SHOWNA = 8
+
+
+def gorev_cubugundan_gizle(w):
+    """Pencereyi görev çubuğundan ve Alt+Tab'dan gizler (WS_EX_TOOLWINDOW ekler, WS_EX_APPWINDOW kaldırır).
+
+    Tk, overrideredirect pencereyi yeniden gösterirken/odaklarken APPWINDOW'u geri getirip görev çubuğu
+    düğmesi açabildiği için her gösterimde yeniden uygulanır. Windows dışında etkisizdir.
+    Stil değiştiyse True döner."""
+    if sys.platform != "win32":
+        return False
+    try:
+        if not w.winfo_exists():
+            return False
+        wid = w.winfo_id()
+        if not wid:
+            return False
+        u32 = ctypes.windll.user32
+        u32.GetParent.argtypes = [ctypes.c_void_p]
+        u32.GetParent.restype = ctypes.c_void_p
+        u32.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        u32.GetWindowLongW.restype = ctypes.c_long
+        u32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_long]
+        u32.SetWindowLongW.restype = ctypes.c_long
+        u32.IsWindowVisible.argtypes = [ctypes.c_void_p]
+        u32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        u32.SetWindowPos.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            ctypes.c_uint,
+        ]
+        hwnd = u32.GetParent(ctypes.c_void_p(wid)) or ctypes.c_void_p(wid)
+        eski = u32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        yeni = (eski | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
+        if yeni == eski:
+            return False
+        gorunur = bool(u32.IsWindowVisible(hwnd))
+        if gorunur:
+            u32.ShowWindow(hwnd, SW_HIDE)  # görev çubuğu düğmesi ancak gizle/göster ile güncellenir
+        u32.SetWindowLongW(hwnd, GWL_EXSTYLE, yeni)
+        u32.SetWindowPos(hwnd, None, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)
+        if gorunur:
+            u32.ShowWindow(hwnd, SW_SHOWNA)
+        return True
+    except Exception:
+        return False
+
+
 def en_uste_al(w):
     """Windows SetWindowPos ile pencerenin gerçekten en üstte kalmasını garantiler."""
     try:
@@ -290,6 +345,7 @@ def en_uste_al(w):
         ]
         u32.SetWindowPos.restype = ctypes.c_int
         hwnd = u32.GetParent(ctypes.c_void_p(wid)) or ctypes.c_void_p(wid)
+        gorev_cubugundan_gizle(w)
         return bool(u32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_USTTE_BAYRAK))
     except Exception:
         return False
@@ -617,7 +673,11 @@ class LimitCubugu:
     # ------------------------------------------------------------ pencere & monitör
     @staticmethod
     def _pencere_kur(w):
-        w.overrideredirect(True)  # kenarlıksız, görev çubuğunda görünmez
+        w.overrideredirect(True)  # kenarlıksız
+        # overrideredirect tek başına görev çubuğu düğmesini engellemez (tıklama/odakta Tk APPWINDOW'u
+        # geri getirir): TOOLWINDOW stilini şimdi ve her gösterimde (<Map>) uygula.
+        gorev_cubugundan_gizle(w)
+        w.bind("<Map>", lambda e, p=w: gorev_cubugundan_gizle(p) if e.widget is p else None, add="+")
         w.attributes("-topmost", True)
         w.attributes("-alpha", OPAKLIK)
         w.configure(bg=SEFFAF)

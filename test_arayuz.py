@@ -898,6 +898,44 @@ def adimlar():
             kontrol(uyg.acik, "sinyal sonrası imleç dışarıdayken panel hemen kapanmaz")
         finally:
             lc.tek_ornek_temizle()
+    # görev çubuğu: tüm üst düzey pencerelerde TOOLWINDOW var, APPWINDOW yok (gösterim/odak sonrası da)
+    if sys.platform == "win32":
+        import ctypes
+        u32 = ctypes.windll.user32
+        u32.GetParent.argtypes = [ctypes.c_void_p]
+        u32.GetParent.restype = ctypes.c_void_p
+        u32.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        u32.GetWindowLongW.restype = ctypes.c_long
+        u32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
+
+        def exstil(w):
+            h = u32.GetParent(ctypes.c_void_p(w.winfo_id())) or w.winfo_id()
+            return u32.GetWindowLongW(h, -20) & 0xFFFFFFFF
+
+        def gizli(w):
+            st = exstil(w)
+            return bool(st & 0x80) and not (st & 0x40000)
+
+        pencereler = {"kök": kok, "kart": uyg.kart, "bildirim": uyg.bildirim}
+        for ad, w in pencereler.items():
+            kontrol(gizli(w), f"görev çubuğu: {ad} penceresi TOOLWINDOW (APPWINDOW yok) - başlangıç")
+        uyg.kart.deiconify(); uyg.bildirim.deiconify(); kok.deiconify()
+        bekle(0.2)
+        for ad, w in pencereler.items():
+            kontrol(gizli(w), f"görev çubuğu: {ad} withdraw/deiconify sonrası stil korunur")
+        for w in pencereler.values():
+            try:
+                u32.SetForegroundWindow(u32.GetParent(ctypes.c_void_p(w.winfo_id())) or w.winfo_id())
+            except Exception:
+                pass
+            w.focus_force()
+            bekle(0.1)
+        kok.event_generate("<Button-1>", x=5, y=5)
+        bekle(0.2)
+        for ad, w in pencereler.items():
+            kontrol(gizli(w), f"görev çubuğu: {ad} odak/tıklama sonrası stil korunur")
+        uyg.kart.withdraw(); uyg.bildirim.withdraw()
+    kontrol(lc.gorev_cubugundan_gizle.__doc__ is not None, "gorev_cubugundan_gizle tanımlı (Windows dışı no-op)")
     uyg.sabit = False
     kok.destroy()
 
