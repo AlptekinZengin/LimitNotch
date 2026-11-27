@@ -640,21 +640,38 @@ def yenile_antigravity(yol=None, sorgu=None):
 
     Haftalık bilgi gelmezse yalnız 5 saatlik güncellenir, haftalık mevcut değerinde kalır.
     """
-    sorgu = sorgu or antigravity_sorgula
+    gizli = False
+    sorgu_fn = antigravity_sorgula if sorgu is None else sorgu
     try:
-        alanlar = antigravity_ayristir(sorgu())
+        alanlar = antigravity_ayristir(sorgu_fn())
     except AntigravityHatasi as h:
         if any(k in str(h).lower() for k in ("kapalı", "closed")):
-            return False, dil.t("agy_kapali_not")
-        return False, dil.t("agy_okunamadi", detay=h)
+            veri = None
+            if sorgu is None:
+                try:
+                    import agy_gizli
+                    veri = agy_gizli.gizli_oku()
+                except Exception:
+                    veri = None
+            if not isinstance(veri, dict):
+                return False, dil.t("agy_kapali_not")
+            try:
+                alanlar = antigravity_ayristir(veri)
+            except AntigravityHatasi as h2:
+                return False, dil.t("agy_okunamadi", detay=h2)
+            except Exception as h2:
+                return False, dil.t("agy_okunamadi", detay=type(h2).__name__)
+            gizli = True
+        else:
+            return False, dil.t("agy_okunamadi", detay=h)
     except Exception as h:
         return False, dil.t("agy_okunamadi", detay=type(h).__name__)
-    alanlar["kaynak"] = dil.t("kaynak_otomatik_yenilendi")
+    alanlar["kaynak"] = dil.t("kaynak_otomatik_gizli" if gizli else "kaynak_otomatik_yenilendi")
     if not ortak.guncelle("antigravity", alanlar, yol or ortak.DURUM_DOSYASI):
         return False, dil.t("agy_yazilamadi")
     if "haftalik" not in alanlar:
         return True, dil.t("agy_bes_saat_yenilendi")
-    return True, dil.t("agy_yenilendi")
+    return True, dil.t("agy_gizli_yenilendi" if gizli else "agy_yenilendi")
 
 
 def yenile_codex(yol=None, sorgu=None):

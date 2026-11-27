@@ -39,7 +39,7 @@ You can also launch without a console window via `baslat.vbs` or `Limit-Cubugu.c
 |---|---|---|
 | **Claude Code** | Stable | Runs `claude -p /usage --output-format json` (official CLI; credentials untouched) |
 | **Codex** | Stable | Queries local `codex app-server` JSON-RPC (`account/rateLimits/read`) |
-| **Antigravity** | Experimental | Reads local daemon port (`hub_*.json` + `RetrieveUserQuotaSummary`). **Works only while the Antigravity desktop app is open** (cannot read when only `agy` CLI is running). |
+| **Antigravity** | Experimental | Reads local daemon port (`hub_*.json` + `RetrieveUserQuotaSummary`). If the desktop app is closed, LimitNotch launches it on a hidden Windows desktop with a separate profile, reads the quota and closes it again (~7 s, at most every 10 min; disable with `LIMIT_CUBUGU_AGY_GIZLI=0`). |
 | **GitHub Copilot** | Experimental | Runs official GitHub CLI `gh api copilot_internal/user` (undocumented endpoint; monthly quota) |
 
 > **Why is Cursor not supported?**

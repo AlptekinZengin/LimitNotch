@@ -39,7 +39,7 @@ Konsolsuz başlatmak için `baslat.vbs` veya `Limit-Cubugu.cmd` dosyalarını da
 |---|---|---|
 | **Claude Code** | Kararlı | `claude -p /usage --output-format json` (resmi CLI; kimlik dosyalarına dokunulmaz) |
 | **Codex** | Kararlı | Yerel `codex app-server` JSON-RPC (`account/rateLimits/read`) |
-| **Antigravity** | Deneysel | Bilgisayardaki yerel kapı (`hub_*.json` + `RetrieveUserQuotaSummary`). **Yalnız Antigravity masaüstü uygulaması açıkken okunur** (`agy` CLI tek başına çalışırken okunamaz). |
+| **Antigravity** | Deneysel | Bilgisayardaki yerel kapı (`hub_*.json` + `RetrieveUserQuotaSummary`). Uygulama kapalıysa LimitNotch onu görünmez ayrı bir Windows masaüstünde, ayrı profille açar, kotayı okuyup kapatır (~7 sn, en çok 10 dakikada bir; kapatmak için `LIMIT_CUBUGU_AGY_GIZLI=0`). |
 | **GitHub Copilot** | Deneysel | Resmi GitHub CLI `gh api copilot_internal/user` (belgesiz uç nokta; aylık kota) |
 
 > **Cursor neden yok?**
