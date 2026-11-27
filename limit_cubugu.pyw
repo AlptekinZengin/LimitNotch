@@ -1185,6 +1185,11 @@ class LimitCubugu:
         degerler = [v for v in (bes[0], hft[0]) if v is not None]
         return durum_rengi(min(degerler) if degerler else None)
 
+    def _arac_haftalik_rengi(self, arac, simdi):
+        bolum = self.durum.get(arac) if isinstance(self.durum, dict) else None
+        kalan, _reset, _yenilendi = ortak.pencere_durumu(bolum, "haftalik", simdi)
+        return durum_rengi(kalan)
+
     def _centik_dongu_acik(self):
         if not isinstance(self.durum, dict):
             return True
@@ -1228,11 +1233,13 @@ class LimitCubugu:
                     dolmus_sn = kalan_sn
             if en_dusuk is None or kalan < en_dusuk:
                 en_dusuk = kalan
+        bes_kalan, _bes_reset, _bes_yenilendi = ortak.pencere_durumu(bolum, "bes_saat", simdi)
+        cizgi_renk = durum_rengi(bes_kalan)
         if dolmus_sn is not None:
             return {
                 "arac": arac,
                 "metin": f"{arac_bilgi(arac)['kisa_ad']} {kisa_sure_metni(dolmus_sn)}",
-                "renk": KIRMIZI,
+                "renk": cizgi_renk,
                 "kritik": True,
                 "oncelik": (0, dolmus_sn),
                 "kalan": 0.0,
@@ -1242,7 +1249,7 @@ class LimitCubugu:
             return {
                 "arac": arac,
                 "metin": dil.t("centik_yuzde", ad=arac_bilgi(arac)["kisa_ad"], yuzde=f"{en_dusuk:.0f}"),
-                "renk": KIRMIZI if kritik else durum_rengi(en_dusuk),
+                "renk": cizgi_renk,
                 "kritik": kritik,
                 "oncelik": (1, en_dusuk),
                 "kalan": en_dusuk,
@@ -1279,7 +1286,7 @@ class LimitCubugu:
         kritikler = [oge for oge in adaylar if oge[2]["kritik"]]
         if kritikler:
             idx, arac, bilgi = min(kritikler, key=lambda oge: oge[2]["oncelik"])
-            return bilgi["metin"], KIRMIZI, idx, arac, "kritik", None, None
+            return bilgi["metin"], bilgi["renk"], idx, arac, "kritik", None, None
 
         if not self._centik_dongu_acik():
             idx, arac, bilgi = min(adaylar, key=lambda oge: oge[2]["oncelik"])
@@ -1381,7 +1388,7 @@ class LimitCubugu:
         nefes_t = (1.0 + math.sin(saat * math.tau / periyot)) / 2.0
         self._son_nefes = round(nefes_t, 2)
         tarama_faz = ((saat / 1.15) % 1.0) if self.yenileniyor else None
-        noktalar = [self._arac_rengi(a, simdi) for a in self.araclar]
+        noktalar = [self._arac_haftalik_rengi(a, simdi) for a in self.araclar]
         img = gm.centik_gorseli(
             self.centik_g,
             self.centik_y,

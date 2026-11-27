@@ -25,7 +25,7 @@ You can also launch without a console window via `baslat.vbs` or `Limit-Cubugu.c
 
 ## Usage
 
-- **Top-center notch:** Sits at the top center of the selected monitor (~168×24 px), cycling sequentially through active tools every 5 seconds with smooth per-tool color/text transitions and an active dot highlight. If any tool drops below 15% or hits 0% (showing countdown), the notch locks onto that critical tool. Hover (~180 ms) or click to expand.
+- **Top-center notch:** Sits at the top center of the selected monitor (~168×24 px), cycling sequentially through active tools every 5 seconds with smooth per-tool color/text transitions and an active dot highlight. If any tool drops below 15% or hits 0% (showing countdown), the notch locks onto that critical tool. Each dot reflects that tool's weekly remaining quota, while the bottom accent bar reflects the displayed tool's 5-hour remaining quota. Hover (~180 ms) or click to expand.
 - **Global shortcut (`Alt + X`):** Toggles the capsule open/closed from any application.
 - **Expanded panel:** Shows dual concentric progress rings per tool (outer = primary/5-hour, inner = weekly/secondary).
   Colors: green `>= 50%` · amber `20%–49%` · red `< 20%` · gray `no data`.

@@ -1060,6 +1060,228 @@ def adimlar():
         uyg._centik_dongu_sifirla()
         bekle(0.05)
 
+    # 25) Çentik renk ayrımı: noktalar haftalık, alt çizgi (vurgu_renk) 5 saatlik
+    eski_r_durum = dict(uyg.durum)
+    eski_r_araclar = list(uyg.araclar)
+    eski_r_parlama = uyg._parlama_bitis
+    eski_r_centik_gorseli = lc.gm.centik_gorseli
+    try:
+        t25 = time.time()
+        uyg.araclari_degistir(["claude", "codex", "antigravity"])
+        uyg.sabit = False
+        uyg.kapat()
+        bekle(0.22)
+        uyg._parlama_bitis = 0.0
+
+        yakalanan_r = []
+
+        def sahte_centik_gorseli_r(*args, **kwargs):
+            yakalanan_r.append((args, kwargs))
+            return eski_r_centik_gorseli(*args, **kwargs)
+
+        lc.gm.centik_gorseli = sahte_centik_gorseli_r
+
+        # (a) Haftalık düşük (%10) + 5 saatlik yüksek (%80) -> kritik kilit, nokta KIRMIZI, alt çizgi YESIL
+        uyg.durum = {
+            "surum": 1,
+            "claude": {
+                "bes_saat": {"kalan": 80, "resets_at": t25 + 3600},
+                "haftalik": {"kalan": 10, "resets_at": t25 + 86400},
+            },
+            "codex": {
+                "bes_saat": {"kalan": 70, "resets_at": t25 + 3600},
+                "haftalik": {"kalan": 75, "resets_at": t25 + 86400},
+            },
+            "antigravity": {
+                "bes_saat": {"kalan": 90, "resets_at": t25 + 3600},
+                "haftalik": {"kalan": 95, "resets_at": t25 + 86400},
+            },
+        }
+        uyg._centik_dongu_sifirla()
+        yakalanan_r.clear()
+        uyg._centik_ciz(simdi=t25, saat=800.0)
+        uyg._centik_ciz(simdi=t25, saat=806.0)
+        r_args, r_kwargs = yakalanan_r[-1]
+        kontrol(
+            uyg._centik_durumu(t25, saat=806.0) == ("Claude %10", lc.YESIL, 0)
+            and r_args[2] == [lc.KIRMIZI, lc.YESIL, lc.YESIL]
+            and r_args[3] == "Claude %10"
+            and r_kwargs.get("vurgu_renk") == lc.YESIL
+            and r_kwargs.get("aktif_nokta") == 0,
+            "haftalık %10 + 5 saatlik %80: kritik kilitte nokta KIRMIZI, alt çizgi YESIL",
+        )
+
+        # (b) 5 saatlik düşük (%10) + haftalık yüksek (%80) -> kritik kilit, nokta YESIL, alt çizgi KIRMIZI
+        uyg.durum["claude"] = {
+            "bes_saat": {"kalan": 10, "resets_at": t25 + 3600},
+            "haftalik": {"kalan": 80, "resets_at": t25 + 86400},
+        }
+        uyg._centik_dongu_sifirla()
+        yakalanan_r.clear()
+        uyg._centik_ciz(simdi=t25, saat=820.0)
+        r_args, r_kwargs = yakalanan_r[-1]
+        kontrol(
+            uyg._centik_durumu(t25, saat=826.0) == ("Claude %10", lc.KIRMIZI, 0)
+            and r_args[2] == [lc.YESIL, lc.YESIL, lc.YESIL]
+            and r_args[3] == "Claude %10"
+            and r_kwargs.get("vurgu_renk") == lc.KIRMIZI
+            and r_kwargs.get("aktif_nokta") == 0,
+            "5 saatlik %10 + haftalık %80: kritik kilitte nokta YESIL, alt çizgi KIRMIZI",
+        )
+
+        # (c) Çoklu araç 5 sn döngüsü: noktalar her aracın haftalık rengi, alt çizgi 5 saatlik rengi döner/karıştırır
+        uyg.durum = {
+            "surum": 1,
+            "claude": {
+                "bes_saat": {"kalan": 82, "resets_at": t25 + 3600},    # YESIL
+                "haftalik": {"kalan": 30, "resets_at": t25 + 86400},   # AMBER
+            },
+            "codex": {
+                "bes_saat": {"kalan": 35, "resets_at": t25 + 3600},    # AMBER
+                "haftalik": {"kalan": 85, "resets_at": t25 + 86400},   # YESIL
+            },
+            "antigravity": {
+                "bes_saat": {"kalan": 18, "resets_at": t25 + 3600},    # KIRMIZI (>=15, kritik kilit yok)
+                "haftalik": {"kalan": 17, "resets_at": t25 + 86400},   # KIRMIZI
+            },
+        }
+        uyg._centik_dongu_sifirla()
+        yakalanan_r.clear()
+        uyg._centik_ciz(simdi=t25, saat=900.0)
+        uyg._centik_ciz(simdi=t25, saat=905.15)
+        uyg._centik_ciz(simdi=t25, saat=905.40)
+        uyg._centik_ciz(simdi=t25, saat=910.40)
+        beklenen_noktalar = [lc.AMBER, lc.YESIL, lc.KIRMIZI]
+        beklenen_ara_t = lc.ease_out(0.15 / lc.CENTIK_GECIS_SN)
+        beklenen_ara_renk = lc.renk_karistir(lc.YESIL, lc.AMBER, beklenen_ara_t)
+        kontrol(
+            len(yakalanan_r) == 4
+            and all(c[0][2] == beklenen_noktalar for c in yakalanan_r)
+            and yakalanan_r[0][1].get("vurgu_renk") == lc.YESIL
+            and yakalanan_r[0][1].get("aktif_nokta") == 0
+            and yakalanan_r[1][1].get("vurgu_renk") == beklenen_ara_renk
+            and yakalanan_r[1][1].get("aktif_nokta") == 1
+            and yakalanan_r[2][1].get("vurgu_renk") == lc.AMBER
+            and yakalanan_r[2][1].get("aktif_nokta") == 1
+            and yakalanan_r[3][1].get("vurgu_renk") == lc.KIRMIZI
+            and yakalanan_r[3][1].get("aktif_nokta") == 2,
+            "çoklu araç 5 sn döngüsünde noktalar haftalık, alt çizgi 5 saatlik renkler arasında geçer",
+        )
+
+        # (d) Eksik haftalık (None) + bes_saat=80 -> nokta GRI, alt çizgi YESIL
+        uyg.durum = {
+            "surum": 1,
+            "claude": {"bes_saat": {"kalan": 80, "resets_at": t25 + 3600}},
+        }
+        uyg._centik_dongu_sifirla()
+        yakalanan_r.clear()
+        uyg._centik_ciz(simdi=t25, saat=950.0)
+        r_args, r_kwargs = yakalanan_r[-1]
+        kontrol(
+            r_args[2] == [lc.GRI, lc.GRI, lc.GRI]
+            and r_kwargs.get("vurgu_renk") == lc.YESIL
+            and r_args[3] == "Claude %80",
+            "eksik haftalık + bes_saat=80: nokta GRI, alt çizgi YESIL",
+        )
+
+        # (e) Eksik bes_saat (None) + haftalik=80 -> nokta YESIL, alt çizgi GRI
+        uyg.durum = {
+            "surum": 1,
+            "claude": {"haftalik": {"kalan": 80, "resets_at": t25 + 86400}},
+        }
+        uyg._centik_dongu_sifirla()
+        yakalanan_r.clear()
+        uyg._centik_ciz(simdi=t25, saat=960.0)
+        r_args, r_kwargs = yakalanan_r[-1]
+        kontrol(
+            r_args[2] == [lc.YESIL, lc.GRI, lc.GRI]
+            and r_kwargs.get("vurgu_renk") == lc.GRI
+            and r_args[3] == "Claude %80",
+            "eksik bes_saat + haftalik=80: nokta YESIL, alt çizgi GRI",
+        )
+
+        # (f) Dolmuş haftalık (0%, gelecek reset) + bes_saat=60 -> kritik kilit, nokta KIRMIZI, alt çizgi YESIL
+        uyg.durum = {
+            "surum": 1,
+            "claude": {
+                "bes_saat": {"kalan": 60, "resets_at": t25 + 3600},
+                "haftalik": {"kalan": 0, "resets_at": t25 + 370},
+            },
+            "codex": {
+                "bes_saat": {"kalan": 75, "resets_at": t25 + 3600},
+                "haftalik": {"kalan": 80, "resets_at": t25 + 86400},
+            },
+        }
+        uyg._centik_dongu_sifirla()
+        yakalanan_r.clear()
+        uyg._centik_ciz(simdi=t25, saat=970.0)
+        r_args, r_kwargs = yakalanan_r[-1]
+        kontrol(
+            uyg._centik_durumu(t25, saat=976.0) == ("Claude 6dk", lc.YESIL, 0)
+            and r_args[2] == [lc.KIRMIZI, lc.YESIL, lc.GRI]
+            and r_args[3] == "Claude 6dk"
+            and r_kwargs.get("vurgu_renk") == lc.YESIL
+            and r_kwargs.get("aktif_nokta") == 0,
+            "dolmuş haftalık + bes_saat=60: kritik kilitte nokta KIRMIZI, alt çizgi YESIL",
+        )
+
+        # (g) Dolmuş bes_saat (0%, gelecek reset) + haftalik=60 -> kritik kilit, nokta YESIL, alt çizgi KIRMIZI
+        uyg.durum = {
+            "surum": 1,
+            "claude": {
+                "bes_saat": {"kalan": 0, "resets_at": t25 + 370},
+                "haftalik": {"kalan": 60, "resets_at": t25 + 86400},
+            },
+            "codex": {
+                "bes_saat": {"kalan": 75, "resets_at": t25 + 3600},
+                "haftalik": {"kalan": 80, "resets_at": t25 + 86400},
+            },
+        }
+        uyg._centik_dongu_sifirla()
+        yakalanan_r.clear()
+        uyg._centik_ciz(simdi=t25, saat=980.0)
+        r_args, r_kwargs = yakalanan_r[-1]
+        kontrol(
+            uyg._centik_durumu(t25, saat=986.0) == ("Claude 6dk", lc.KIRMIZI, 0)
+            and r_args[2] == [lc.YESIL, lc.YESIL, lc.GRI]
+            and r_args[3] == "Claude 6dk"
+            and r_kwargs.get("vurgu_renk") == lc.KIRMIZI
+            and r_kwargs.get("aktif_nokta") == 0,
+            "dolmuş bes_saat + haftalik=60: kritik kilitte nokta YESIL, alt çizgi KIRMIZI",
+        )
+
+        # (h) Yenilenme parlaması (parliyor) alt çizgiyi YESIL zorlar; boş veri VURGU + GRI noktalar verir
+        uyg._parlama_bitis = t25 + 3.0
+        yakalanan_r.clear()
+        uyg._centik_ciz(simdi=t25, saat=990.0)
+        r_args, r_kwargs = yakalanan_r[-1]
+        kontrol(
+            r_kwargs.get("vurgu_renk") == lc.YESIL
+            and r_args[2] == [lc.YESIL, lc.YESIL, lc.GRI],
+            "parlama (parliyor) aktifken alt çizgi YESIL olur, noktalar haftalık rengini korur",
+        )
+
+        uyg._parlama_bitis = 0.0
+        uyg.durum = {"surum": 1}
+        uyg._centik_dongu_sifirla()
+        yakalanan_r.clear()
+        uyg._centik_ciz(simdi=t25, saat=1000.0)
+        r_args, r_kwargs = yakalanan_r[-1]
+        kontrol(
+            r_args[2] == [lc.GRI, lc.GRI, lc.GRI]
+            and r_args[3] == dil.t("centik_bos")
+            and r_kwargs.get("vurgu_renk") == lc.VURGU
+            and r_kwargs.get("aktif_nokta") is None,
+            "veri yokken alt çizgi VURGU ve tüm noktalar GRI olur",
+        )
+    finally:
+        lc.gm.centik_gorseli = eski_r_centik_gorseli
+        uyg._parlama_bitis = eski_r_parlama
+        uyg.durum = eski_r_durum
+        uyg.araclari_degistir(eski_r_araclar)
+        uyg._centik_dongu_sifirla()
+        bekle(0.05)
+
     # Gerçek ikinci süreç -> izole Windows event -> çalışan Tk paneli.
     with patch.dict(os.environ, {"LIMIT_CUBUGU_ORNEK_ADI": "LimitCubuguArayuzTest_" + uuid.uuid4().hex}):
         try:

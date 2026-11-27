@@ -25,7 +25,7 @@ Konsolsuz başlatmak için `baslat.vbs` veya `Limit-Cubugu.cmd` dosyalarını da
 
 ## Kullanım
 
-- **Üst orta çentik:** Seçili monitörün en üst ortasında (~168×24 px) durur; etkin araçlar arasında 5 saniyede bir sırayla geçer, araca göre yumuşak renk/yazı geçişi yapar ve aktif noktayı vurgular. Herhangi bir araç %15'in altına düşerse veya dolarsa (geri sayım göstererek) o kritik araca kilitlenir. Fareyle üzerine gelince (~180 ms) veya tıklayınca açılır.
+- **Üst orta çentik:** Seçili monitörün en üst ortasında (~168×24 px) durur; etkin araçlar arasında 5 saniyede bir sırayla geçer, araca göre yumuşak renk/yazı geçişi yapar ve aktif noktayı vurgular. Herhangi bir araç %15'in altına düşerse veya dolarsa (geri sayım göstererek) o kritik araca kilitlenir. Çentikteki noktalar her aracın haftalık kalan limitini, alt vurgu çizgisi ise gösterilen aracın 5 saatlik kalan limitini renklendirir. Fareyle üzerine gelince (~180 ms) veya tıklayınca açılır.
 - **Global kısayol (`Alt + X`):** Herhangi bir uygulamadayken paneli açar/kapatır.
 - **Yatay kapsül:** Her araç için iki halka gösterir (dış = 5 saatlik/birincil, iç = haftalık/ikincil).
   Renkler: yeşil `%50+` · amber `%20–49` · kırmızı `< %20` · gri `veri yok`.
