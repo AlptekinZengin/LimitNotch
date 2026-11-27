@@ -65,16 +65,20 @@ _FONT_ADAYLARI = {
 # ---------------------------------------------------------------- renk & metin yardımcıları
 def _hex_rgba(renk: str, alpha: int = 255) -> tuple[int, int, int, int]:
     """'#RRGGBB' veya '#RRGGBBAA' dizgisini (r, g, b, a) demetine çevirir."""
+    varsayilan = (203, 213, 225, max(0, min(255, int(alpha))))
     if not isinstance(renk, str):
-        return (203, 213, 225, max(0, min(255, int(alpha))))
+        return varsayilan
     h = renk.strip().lstrip("#")
     if len(h) == 3:
         h = "".join(c * 2 for c in h)
-    if len(h) == 6:
-        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), max(0, min(255, int(alpha))))
-    if len(h) == 8:
-        return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), int(h[6:8], 16))
-    return (203, 213, 225, max(0, min(255, int(alpha))))
+    try:
+        if len(h) == 6:
+            return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), varsayilan[3])
+        if len(h) == 8:
+            return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), int(h[6:8], 16))
+    except ValueError:
+        return varsayilan
+    return varsayilan
 
 
 def _karistir_rgba(
@@ -597,6 +601,35 @@ def _uyari_ikonu_ciz(d: ImageDraw.ImageDraw, cx: float, cy: float, r: float, ren
 
 
 # ================================================================ 1. ÇENTİK
+def _centik_metin_katmani_birlestir(
+    img: Image.Image,
+    metin: str,
+    metin_sol: float,
+    metin_sag: float,
+    cy_metin: float,
+    clip_x0: int,
+    clip_y0: int,
+    clip_w: int,
+    clip_h: int,
+    o: float,
+    alpha: float,
+) -> None:
+    """Tek bir çentik metin katmanını 3× çözünürlükte alfa harmanlayarak birleştirir."""
+    etiket = str(metin or "").strip()
+    a = max(0, min(255, round(255.0 * alpha)))
+    if not etiket or a <= 0 or clip_w <= 0 or clip_h <= 0:
+        return
+    max_metin_g = max(20.0, metin_sag - metin_sol)
+    katman = Image.new("RGBA", (clip_w, clip_h), (0, 0, 0, 0))
+    kd = ImageDraw.Draw(katman)
+    font = _metin_sigdir_font(kd, etiket, max_metin_g, round(11.5 * o * S), round(8.5 * o * S), "semibold")
+    etiket = _metin_kirp(kd, etiket, font, max_metin_g)
+    cx = (metin_sol + metin_sag) / 2.0 - clip_x0
+    cy = cy_metin - clip_y0
+    kd.text((cx, cy), etiket, fill=_hex_rgba(YAZI, a), font=font, anchor="mm")
+    img.alpha_composite(katman, dest=(clip_x0, clip_y0))
+
+
 def centik_gorseli(
     w: int,
     h: int,
@@ -605,6 +638,9 @@ def centik_gorseli(
     vurgu_renk: str = VURGU,
     nefes: float = 0.0,
     tarama_faz: float | None = None,
+    aktif_nokta: int | None = None,
+    onceki_metin: str | None = None,
+    gecis_t: float = 1.0,
 ) -> Image.Image:
     """Üst orta kapalı çentik (Dinamik Ada) görselini 3× supersampling ile üretir."""
     w = max(48, int(round(w)))
@@ -617,7 +653,13 @@ def centik_gorseli(
     d = ImageDraw.Draw(img)
 
     # Alt nefes alan parlak vurgu çizgisi + yumuşak opak aura
-    nefes_t = max(0.0, min(1.0, float(nefes)))
+    try:
+        nefes_t = float(nefes)
+        if not math.isfinite(nefes_t):
+            nefes_t = 0.0
+    except (TypeError, ValueError):
+        nefes_t = 0.0
+    nefes_t = max(0.0, min(1.0, nefes_t))
     cizgi_renk = _karistir_rgba(_karistir_rgba(ZEMIN_ORTA, vurgu_renk, 0.50), vurgu_renk, nefes_t)
     aura_renk = _karistir_rgba(ZEMIN_ALT, vurgu_renk, 0.20 + 0.22 * nefes_t)
     cx1, cx2 = 15.0 * o * S, w_s - 15.0 * o * S
@@ -628,22 +670,84 @@ def centik_gorseli(
     if tarama_faz is not None:
         _tarama_seridi_ciz(d, w_s, tarama_faz, o)
 
-    # Sol tarafta durum noktaları (3 araç: Claude, Codex, Antigravity)
+    # Sol tarafta durum noktaları (aktif araç vurgusu opsiyonel)
     cy = (h_s - 2.5 * o * S) / 2.0
     r_nokta = max(2.8, 3.1 * o) * S
     bas_x = 16.0 * o * S
     adim = 10.5 * o * S
     nokta_list = list(noktalar or ())
-    for i, renk in enumerate(nokta_list):
-        nx = bas_x + i * adim
-        # Yumuşak opak LED parıltı halkası
+
+    aktif_idx: int | None = None
+    if aktif_nokta is not None and not isinstance(aktif_nokta, bool):
+        try:
+            idx = int(aktif_nokta)
+            if 0 <= idx < len(nokta_list):
+                aktif_idx = idx
+        except (TypeError, ValueError):
+            aktif_idx = None
+
+    if aktif_idx is None:
+        for i, renk in enumerate(nokta_list):
+            nx = bas_x + i * adim
+            # Yumuşak opak LED parıltı halkası
+            d.ellipse(
+                (nx - r_nokta * 1.48, cy - r_nokta * 1.48, nx + r_nokta * 1.48, cy + r_nokta * 1.48),
+                fill=_karistir_rgba(ZEMIN_ORTA, renk, 0.26),
+            )
+            d.ellipse(
+                (nx - r_nokta, cy - r_nokta, nx + r_nokta, cy + r_nokta),
+                fill=_hex_rgba(renk),
+            )
+    else:
+        # Önce pasif noktaları hafif yumuşatılmış tonda çiz, sonra aktif noktayı üste yerleştir
+        r_pasif = r_nokta * 0.86
+        for i, renk in enumerate(nokta_list):
+            if i == aktif_idx:
+                continue
+            nx = bas_x + i * adim
+            d.ellipse(
+                (nx - r_pasif * 1.28, cy - r_pasif * 1.28, nx + r_pasif * 1.28, cy + r_pasif * 1.28),
+                fill=_karistir_rgba(ZEMIN_ORTA, renk, 0.12),
+            )
+            d.ellipse(
+                (nx - r_pasif, cy - r_pasif, nx + r_pasif, cy + r_pasif),
+                fill=_karistir_rgba(ZEMIN_ORTA, renk, 0.58),
+            )
+
+        nx = bas_x + aktif_idx * adim
+        renk = nokta_list[aktif_idx]
+        # Dış yumuşak ambient parıltı
+        r_dis = r_nokta * 1.72
         d.ellipse(
-            (nx - r_nokta * 1.48, cy - r_nokta * 1.48, nx + r_nokta * 1.48, cy + r_nokta * 1.48),
-            fill=_karistir_rgba(ZEMIN_ORTA, renk, 0.26),
+            (nx - r_dis, cy - r_dis, nx + r_dis, cy + r_dis),
+            fill=_karistir_rgba(ZEMIN_ORTA, renk, 0.24),
         )
+        # İnce, zarif vurgulu dış halka + koyu nefes boşluğu
+        r_halka = r_nokta * 1.52
+        halka_renk = _karistir_rgba(ZEMIN_ORTA, _karistir_rgba(renk, "#FFFFFF", 0.32), 0.82)
         d.ellipse(
-            (nx - r_nokta, cy - r_nokta, nx + r_nokta, cy + r_nokta),
+            (nx - r_halka, cy - r_halka, nx + r_halka, cy + r_halka),
+            outline=halka_renk,
+            width=max(2, round(0.75 * o * S)),
+        )
+        r_bosluk = r_nokta * 1.26
+        d.ellipse(
+            (nx - r_bosluk, cy - r_bosluk, nx + r_bosluk, cy + r_bosluk),
+            fill=_karistir_rgba(ZEMIN_ORTA, renk, 0.14),
+        )
+        # Canlı ve doygun aktif LED çekirdeği
+        r_aktif = r_nokta * 1.02
+        d.ellipse(
+            (nx - r_aktif, cy - r_aktif, nx + r_aktif, cy + r_aktif),
             fill=_hex_rgba(renk),
+        )
+        # Merkezde hafif optik parlama noktası
+        r_ic = r_aktif * 0.34
+        ix = nx - r_aktif * 0.22
+        iy = cy - r_aktif * 0.22
+        d.ellipse(
+            (ix - r_ic, iy - r_ic, ix + r_ic, iy + r_ic),
+            fill=_karistir_rgba(renk, "#FFFFFF", 0.38),
         )
 
     # Dikey ince ayraç
@@ -660,11 +764,66 @@ def centik_gorseli(
 
     metin_sag = w_s - 10.0 * o * S
     max_metin_g = max(20.0, metin_sag - metin_sol)
+
+    try:
+        t_val = float(gecis_t)
+        if not math.isfinite(t_val):
+            t_val = 1.0
+    except (TypeError, ValueError):
+        t_val = 1.0
+    t_val = max(0.0, min(1.0, t_val))
+
     etiket = str(metin or "").strip()
-    if etiket:
-        font = _metin_sigdir_font(d, etiket, max_metin_g, round(11.5 * o * S), round(8.5 * o * S), "semibold")
-        etiket = _metin_kirp(d, etiket, font, max_metin_g)
-        d.text(((metin_sol + metin_sag) / 2.0, cy), etiket, fill=_hex_rgba(YAZI), font=font, anchor="mm")
+    onceki_etiket = str(onceki_metin or "").strip() if onceki_metin is not None else None
+
+    if onceki_etiket is None or t_val >= 1.0 or onceki_etiket == etiket:
+        if etiket:
+            font = _metin_sigdir_font(d, etiket, max_metin_g, round(11.5 * o * S), round(8.5 * o * S), "semibold")
+            etiket = _metin_kirp(d, etiket, font, max_metin_g)
+            d.text(((metin_sol + metin_sag) / 2.0, cy), etiket, fill=_hex_rgba(YAZI), font=font, anchor="mm")
+    elif t_val <= 0.0:
+        if onceki_etiket:
+            font = _metin_sigdir_font(d, onceki_etiket, max_metin_g, round(11.5 * o * S), round(8.5 * o * S), "semibold")
+            onceki_etiket = _metin_kirp(d, onceki_etiket, font, max_metin_g)
+            d.text(((metin_sol + metin_sag) / 2.0, cy), onceki_etiket, fill=_hex_rgba(YAZI), font=font, anchor="mm")
+    else:
+        clip_x0 = max(0, int(math.floor(metin_sol - 2.0 * o * S)))
+        clip_x1 = min(w_s, int(math.ceil(metin_sag + 2.0 * o * S)))
+        clip_y0 = max(0, round(1.5 * o * S))
+        clip_y1 = min(h_s, round(h_s - 4.5 * o * S))
+        clip_w = clip_x1 - clip_x0
+        clip_h = clip_y1 - clip_y0
+        kayma = 2.0 * o * S
+        alpha_eski = (1.0 - t_val) ** 1.2
+        alpha_yeni = t_val ** 1.2
+        if onceki_etiket:
+            _centik_metin_katmani_birlestir(
+                img,
+                onceki_etiket,
+                metin_sol,
+                metin_sag,
+                cy - kayma * t_val,
+                clip_x0,
+                clip_y0,
+                clip_w,
+                clip_h,
+                o,
+                alpha_eski,
+            )
+        if etiket:
+            _centik_metin_katmani_birlestir(
+                img,
+                etiket,
+                metin_sol,
+                metin_sag,
+                cy + kayma * (1.0 - t_val),
+                clip_x0,
+                clip_y0,
+                clip_w,
+                clip_h,
+                o,
+                alpha_yeni,
+            )
 
     return _kucult(img, w, h)
 

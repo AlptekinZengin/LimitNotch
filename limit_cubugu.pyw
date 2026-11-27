@@ -57,6 +57,10 @@ ACILMA_GECIKMESI = 0.18   # sn (~180 ms)
 KAPANMA_GECIKMESI = 0.50  # sn
 YOKLAMA_MS = 50
 MONITOR_KONTROL_SN = 2.0  # yalnız monitör düzeni; durum.json burada okunmaz
+CENTIK_DONGU_SN = 5.0
+CENTIK_GECIS_SN = 0.35
+CENTIK_KRITIK_ESIK = 15.0
+CENTIK_GECIS_KARE_SN = 1.0 / 30.0
 
 GUNLER = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
 FONT = "Segoe UI"
@@ -472,7 +476,17 @@ class LimitCubugu:
         self._kart_hover_dugme = None
         self._animasyon_id = None
         self._son_nefes = None
-        self._hareket_saati = 0.0
+        self._hareket_saati = time.perf_counter()
+        self._centik_dongu_bas = None
+        self._centik_son_adim = None
+        self._centik_aktif_arac = None
+        self._centik_son_etiket = None
+        self._centik_son_renk = None
+        self._centik_gecis_bas = None
+        self._centik_gecis_onceki_metin = None
+        self._centik_gecis_onceki_renk = None
+        self._son_gecis_cizim = 0.0
+        self._centik_dongu_var = None
         self._panel_hitboxes = {}
         self._kart_hitboxes = {}
         self._panel_foto = None
@@ -628,13 +642,24 @@ class LimitCubugu:
         elif self.yenileniyor:
             self._yeniden_ciz()
         elif not self.acik:
-            # Yavaş nefes (veya yenilenme sonrası ~3 sn yumuşak yeşil parlama)
-            parliyor = time.time() < self._parlama_bitis
-            periyot = 1.2 if parliyor else 4.0
-            nefes_adim = round((1.0 + math.sin(simdi * math.tau / periyot)) / 2.0, 2)
-            if nefes_adim != self._son_nefes:
-                self._son_nefes = nefes_adim
-                self._centik_ciz()
+            dongu_tetik = self._centik_dongu_adim_degisti(simdi)
+            gecis_suruyor = self._centik_gecis_bas is not None
+            if dongu_tetik:
+                self._son_gecis_cizim = simdi
+                self._centik_ciz(saat=simdi)
+            elif gecis_suruyor:
+                if (simdi - self._son_gecis_cizim >= CENTIK_GECIS_KARE_SN
+                        or (simdi - self._centik_gecis_bas) >= CENTIK_GECIS_SN):
+                    self._son_gecis_cizim = simdi
+                    self._centik_ciz(saat=simdi)
+            else:
+                # Yavaş nefes (veya yenilenme sonrası ~3 sn yumuşak yeşil parlama)
+                parliyor = time.time() < self._parlama_bitis
+                periyot = 1.2 if parliyor else 4.0
+                nefes_adim = round((1.0 + math.sin(simdi * math.tau / periyot)) / 2.0, 2)
+                if nefes_adim != self._son_nefes:
+                    self._son_nefes = nefes_adim
+                    self._centik_ciz(saat=simdi)
         if self.kart_arac:
             if self._kart_bas is not None:
                 t = (simdi - self._kart_bas) * 1000 / KART_MS
@@ -773,6 +798,7 @@ class LimitCubugu:
         self._kart_hitboxes = {}
         self._ada_bas = None
         self._ada_deger = 1.0 if self.acik else 0.0
+        self._centik_dongu_sifirla()
         if self.kart_arac and self.kart_arac not in self.araclar:
             self.kart_gizle()
         if self.acik:
@@ -1159,38 +1185,202 @@ class LimitCubugu:
         degerler = [v for v in (bes[0], hft[0]) if v is not None]
         return durum_rengi(min(degerler) if degerler else None)
 
+    def _centik_dongu_acik(self):
+        if not isinstance(self.durum, dict):
+            return True
+        if "centik_dongu" not in self.durum:
+            return True
+        return bool(self.durum["centik_dongu"])
+
+    def _centik_dongu_sifirla(self):
+        self._centik_dongu_bas = None
+        self._centik_son_adim = None
+        self._centik_aktif_arac = None
+        self._centik_son_etiket = None
+        self._centik_son_renk = None
+        self._centik_gecis_bas = None
+        self._centik_gecis_onceki_metin = None
+        self._centik_gecis_onceki_renk = None
+        self._son_gecis_cizim = 0.0
+
+    def _centik_dongu_adim_degisti(self, saat):
+        if not self._centik_dongu_acik():
+            return False
+        if self._centik_dongu_bas is None or self._centik_son_adim is None:
+            return False
+        if saat < self._centik_dongu_bas:
+            return True
+        adim = int((max(0.0, saat - self._centik_dongu_bas) + 1e-9) // CENTIK_DONGU_SN)
+        return adim != self._centik_son_adim
+
+    def _centik_arac_ozeti(self, arac, simdi):
+        """Tek araç için çentik bilgisi: veri yoksa None, varsa sözlük."""
+        bolum = self.durum.get(arac) if isinstance(self.durum, dict) else None
+        dolmus_sn = None
+        en_dusuk = None
+        for pencere in ortak.PENCERELER:
+            kalan, reset, yenilendi = ortak.pencere_durumu(bolum, pencere, simdi)
+            if kalan is None:
+                continue
+            if kalan <= 0.0 and not yenilendi and reset is not None and reset > simdi:
+                kalan_sn = reset - simdi
+                if dolmus_sn is None or kalan_sn < dolmus_sn:
+                    dolmus_sn = kalan_sn
+            if en_dusuk is None or kalan < en_dusuk:
+                en_dusuk = kalan
+        if dolmus_sn is not None:
+            return {
+                "arac": arac,
+                "metin": f"{arac_bilgi(arac)['kisa_ad']} {kisa_sure_metni(dolmus_sn)}",
+                "renk": KIRMIZI,
+                "kritik": True,
+                "oncelik": (0, dolmus_sn),
+                "kalan": 0.0,
+            }
+        if en_dusuk is not None:
+            kritik = en_dusuk < CENTIK_KRITIK_ESIK
+            return {
+                "arac": arac,
+                "metin": dil.t("centik_yuzde", ad=arac_bilgi(arac)["kisa_ad"], yuzde=f"{en_dusuk:.0f}"),
+                "renk": KIRMIZI if kritik else durum_rengi(en_dusuk),
+                "kritik": kritik,
+                "oncelik": (1, en_dusuk),
+                "kalan": en_dusuk,
+            }
+        return None
+
+    def _centik_adaylar(self, simdi):
+        """Verisi olan etkin araçlar için (indeks, arac, bilgi) listesi."""
+        adaylar = []
+        for idx, arac in enumerate(self.araclar):
+            bilgi = self._centik_arac_ozeti(arac, simdi)
+            if bilgi is not None:
+                adaylar.append((idx, arac, bilgi))
+        return adaylar
+
+    def _centik_en_dusuk(self, simdi):
+        """Klasik en kritik / en düşük kalan araç özeti: (metin, vurgu_rengi, aktif_nokta)."""
+        adaylar = self._centik_adaylar(simdi)
+        if not adaylar:
+            return dil.t("centik_bos"), VURGU, None
+        idx, _arac, bilgi = min(adaylar, key=lambda oge: oge[2]["oncelik"])
+        return bilgi["metin"], bilgi["renk"], idx
+
     def _centik_ozeti(self, simdi):
         """Kapalı çentik için en kritik tek bakışlık özet: (metin, vurgu_rengi)."""
-        dolmus = None  # (kalan_sn, arac)
-        en_dusuk = None  # (kalan, arac)
-        for arac in self.araclar:
-            bolum = self.durum.get(arac)
-            for pencere in ortak.PENCERELER:
-                kalan, reset, yenilendi = ortak.pencere_durumu(bolum, pencere, simdi)
-                if kalan is None:
-                    continue
-                if kalan <= 0.0 and not yenilendi and reset is not None and reset > simdi:
-                    kalan_sn = reset - simdi
-                    if dolmus is None or kalan_sn < dolmus[0]:
-                        dolmus = (kalan_sn, arac)
-                if en_dusuk is None or kalan < en_dusuk[0]:
-                    en_dusuk = (kalan, arac)
-        if dolmus is not None:
-            return f"{arac_bilgi(dolmus[1])['kisa_ad']} {kisa_sure_metni(dolmus[0])}", KIRMIZI
-        if en_dusuk is not None:
-            return dil.t("centik_yuzde", ad=arac_bilgi(en_dusuk[1])["kisa_ad"], yuzde=f"{en_dusuk[0]:.0f}"), durum_rengi(en_dusuk[0])
-        return dil.t("centik_bos"), VURGU
+        etiket, renk, _aktif = self._centik_en_dusuk(simdi)
+        return etiket, renk
 
-    def _centik_ciz(self):
-        simdi = time.time()
-        etiket, vurgu_rengi = self._centik_ozeti(simdi)
+    def _centik_secim_hesapla(self, simdi, saat):
+        adaylar = self._centik_adaylar(simdi)
+        if not adaylar:
+            return dil.t("centik_bos"), VURGU, None, None, "bos", None, None
+
+        kritikler = [oge for oge in adaylar if oge[2]["kritik"]]
+        if kritikler:
+            idx, arac, bilgi = min(kritikler, key=lambda oge: oge[2]["oncelik"])
+            return bilgi["metin"], KIRMIZI, idx, arac, "kritik", None, None
+
+        if not self._centik_dongu_acik():
+            idx, arac, bilgi = min(adaylar, key=lambda oge: oge[2]["oncelik"])
+            return bilgi["metin"], bilgi["renk"], idx, arac, "sabit", None, None
+
+        if len(adaylar) == 1:
+            idx, arac, bilgi = adaylar[0]
+            return bilgi["metin"], bilgi["renk"], idx, arac, "tek", None, None
+
+        if self._centik_dongu_bas is None or saat < self._centik_dongu_bas:
+            self._centik_dongu_bas = saat
+        gecen = max(0.0, saat - self._centik_dongu_bas)
+        adim = int((gecen + 1e-9) // CENTIK_DONGU_SN)
+        slot = adim % len(adaylar)
+        slot_bas = self._centik_dongu_bas + adim * CENTIK_DONGU_SN
+        idx, arac, bilgi = adaylar[slot]
+        return bilgi["metin"], bilgi["renk"], idx, arac, "dongu", adim, slot_bas
+
+    def _centik_durumu(self, simdi, saat=None):
+        """Kapalı çentik durumu (5 sn döngü / kritik kilit / sabit): (metin, vurgu_rengi, aktif_nokta)."""
+        if saat is None:
+            saat = self._hareket_saati if self._hareket_saati > 0 else time.perf_counter()
+        if self._centik_dongu_bas is not None and saat < self._centik_dongu_bas:
+            self._centik_dongu_sifirla()
+        etiket, renk, aktif_nokta, _arac, mod, _adim, _slot_bas = self._centik_secim_hesapla(simdi, saat)
+        if mod != "dongu":
+            self._centik_dongu_bas = None
+            self._centik_son_adim = None
+        return etiket, renk, aktif_nokta
+
+    def _centik_gecis_durumu(self, simdi, saat=None):
+        """Çentik çizimi için geçişli durum: (metin, vurgu_rengi, aktif_nokta, onceki_metin, gecis_t)."""
+        if saat is None:
+            saat = self._hareket_saati if self._hareket_saati > 0 else time.perf_counter()
+        if self._centik_dongu_bas is not None and saat < self._centik_dongu_bas:
+            self._centik_dongu_sifirla()
+
+        etiket, hedef_renk, aktif_nokta, arac, mod, adim, slot_bas = self._centik_secim_hesapla(simdi, saat)
+
+        if mod != "dongu":
+            self._centik_dongu_bas = None
+            self._centik_son_adim = None
+            self._centik_gecis_bas = None
+            self._centik_gecis_onceki_metin = None
+            self._centik_gecis_onceki_renk = None
+            self._centik_aktif_arac = None
+            self._centik_son_etiket = None
+            self._centik_son_renk = None
+            return etiket, hedef_renk, aktif_nokta, None, 1.0
+
+        if self._centik_gecis_bas is not None and saat < self._centik_gecis_bas:
+            self._centik_gecis_bas = None
+            self._centik_gecis_onceki_metin = None
+            self._centik_gecis_onceki_renk = None
+
+        self._centik_son_adim = adim
+
+        if (self._centik_aktif_arac is not None
+                and arac != self._centik_aktif_arac
+                and self._centik_son_etiket is not None
+                and self._centik_son_renk is not None):
+            if (self._centik_gecis_bas is not None
+                    and self._centik_gecis_onceki_renk is not None):
+                eski_t = ease_out((saat - self._centik_gecis_bas) / CENTIK_GECIS_SN)
+                bas_renk = renk_karistir(self._centik_gecis_onceki_renk, self._centik_son_renk, eski_t)
+            else:
+                bas_renk = self._centik_son_renk
+            self._centik_gecis_onceki_metin = self._centik_son_etiket
+            self._centik_gecis_onceki_renk = bas_renk
+            self._centik_gecis_bas = slot_bas if (slot_bas is not None and slot_bas <= saat) else saat
+
+        self._centik_aktif_arac = arac
+        self._centik_son_etiket = etiket
+        self._centik_son_renk = hedef_renk
+
+        if self._centik_gecis_bas is not None and self._centik_gecis_onceki_metin is not None:
+            ham_t = (saat - self._centik_gecis_bas) / CENTIK_GECIS_SN
+            if ham_t < 1.0:
+                t = ease_out(max(0.0, ham_t))
+                onceki_renk = self._centik_gecis_onceki_renk or hedef_renk
+                karisik_renk = renk_karistir(onceki_renk, hedef_renk, t)
+                return etiket, karisik_renk, aktif_nokta, self._centik_gecis_onceki_metin, t
+            self._centik_gecis_bas = None
+            self._centik_gecis_onceki_metin = None
+            self._centik_gecis_onceki_renk = None
+
+        return etiket, hedef_renk, aktif_nokta, None, 1.0
+
+    def _centik_ciz(self, simdi=None, saat=None):
+        if simdi is None:
+            simdi = time.time()
+        if saat is None:
+            saat = self._hareket_saati if self._hareket_saati > 0 else time.perf_counter()
+        etiket, vurgu_rengi, aktif_nokta, onceki_metin, gecis_t = self._centik_gecis_durumu(simdi, saat=saat)
         self._centik_vurgu = vurgu_rengi
         parliyor = simdi < self._parlama_bitis
         cizgi_rengi = YESIL if parliyor else vurgu_rengi
         periyot = 1.2 if parliyor else 4.0
-        nefes_t = (1.0 + math.sin(self._hareket_saati * math.tau / periyot)) / 2.0
+        nefes_t = (1.0 + math.sin(saat * math.tau / periyot)) / 2.0
         self._son_nefes = round(nefes_t, 2)
-        tarama_faz = ((self._hareket_saati / 1.15) % 1.0) if self.yenileniyor else None
+        tarama_faz = ((saat / 1.15) % 1.0) if self.yenileniyor else None
         noktalar = [self._arac_rengi(a, simdi) for a in self.araclar]
         img = gm.centik_gorseli(
             self.centik_g,
@@ -1200,6 +1390,9 @@ class LimitCubugu:
             vurgu_renk=cizgi_rengi,
             nefes=nefes_t,
             tarama_faz=tarama_faz,
+            aktif_nokta=aktif_nokta,
+            onceki_metin=onceki_metin,
+            gecis_t=gecis_t,
         )
         self._son_centik_img = img
         self._tuvale_gorsel_koy(self.tuval, "_panel_foto", "_panel_img_id", img)
@@ -1221,6 +1414,7 @@ class LimitCubugu:
         self.kart_gizle()
         self._hover_arac = None
         self._hover_dugme = None
+        self._centik_dongu_sifirla()
         self._ada_baslat(0.0)
 
     # ------------------------------------------------------------ panel (açık hâl)
@@ -1331,9 +1525,25 @@ class LimitCubugu:
             return False
         dil.dil_ayarla(kod)
         self.durum["dil"] = kod
+        self._centik_gecis_bas = None
+        self._centik_gecis_onceki_metin = None
+        self._centik_gecis_onceki_renk = None
+        self._centik_son_etiket = None
         self._son_nefes = None
         self._yeniden_ciz()
         return True
+
+    def centik_dongu_ayarla(self, acik=None):
+        """Çentikte sırayla gösterme ayarını değiştirir, kaydeder ve görünümü tazeler."""
+        yeni_deger = (not self._centik_dongu_acik()) if acik is None else bool(acik)
+        ortak.ayar_guncelle({"centik_dongu": yeni_deger})
+        if isinstance(self.durum, dict):
+            self.durum["centik_dongu"] = yeni_deger
+        self._centik_dongu_sifirla()
+        self._son_nefes = None
+        if not self.acik and self._ada_bas is None:
+            self._centik_ciz()
+        return yeni_deger
 
     def _arac_secimi_ac(self):
         """'Araçları bağla' penceresini açar ve seçimi canlı uygular."""
@@ -1375,6 +1585,13 @@ class LimitCubugu:
                            font=(FONT, 9))
             menu.add_command(label=dil.t("menu_araclari_sec"),
                              command=lambda: self.kok.after(10, self._arac_secimi_ac))
+            dongu_var = tk.BooleanVar(master=self.kok, value=self._centik_dongu_acik())
+            self._centik_dongu_var = dongu_var
+            menu.add_checkbutton(
+                label=dil.t("menu_centik_dongu"),
+                variable=dongu_var,
+                command=lambda v=dongu_var: self.centik_dongu_ayarla(bool(v.get())),
+            )
             dil_menu = tk.Menu(menu, tearoff=0, bg=KART, fg=YAZI,
                                activebackground=gm.YUZEY_HOVER, activeforeground=YAZI,
                                font=(FONT, 9))

@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import time
+import unittest
 import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -26,6 +27,7 @@ os.environ["LIMIT_CUBUGU_KURULUM"] = "0"
 os.environ["LIMITNOTCH_DIL"] = "tr"
 sys.path.insert(0, BURASI)
 
+import dil  # noqa: E402
 import durum_ortak as ortak  # noqa: E402
 import yenileyici  # noqa: E402
 
@@ -877,6 +879,187 @@ def adimlar():
         uyg.durum = eski_ag_durum
         uyg.yenileme_notu = eski_ag_notlar
 
+    # 24) Çentik 5 sn sırayla döngü, araç bazlı renk geçişi, kritik kilit ve sağ tık ayarı
+    eski_d_durum = dict(uyg.durum)
+    eski_d_araclar = list(uyg.araclar)
+    eski_d_disk = ortak.oku()
+    eski_d_centik_gorseli = lc.gm.centik_gorseli
+    try:
+        t24 = time.time()
+        uyg.araclari_degistir(["claude", "codex", "antigravity"])
+        uyg.sabit = False
+        uyg.kapat()
+        bekle(0.22)
+
+        # (a) 5 sn sırayla dönme + araç bazlı durum rengi + başa sarma
+        uyg.durum = {
+            "surum": 1,
+            "claude": {"bes_saat": {"kalan": 82, "resets_at": t24 + 3600}},
+            "codex": {"bes_saat": {"kalan": 31, "resets_at": t24 + 3600}},
+            "antigravity": {"bes_saat": {"kalan": 94, "resets_at": t24 + 3600}},
+        }
+        uyg._centik_dongu_sifirla()
+        kontrol(uyg._centik_durumu(t24, saat=100.0) == ("Claude %82", lc.YESIL, 0),
+                "çentik döngüsü t=0 sn'de Claude %82 (yeşil, nokta 0)")
+        kontrol(uyg._centik_durumu(t24, saat=104.9) == ("Claude %82", lc.YESIL, 0),
+                "çentik döngüsü 5 sn dolmadan araç değiştirmez")
+        kontrol(uyg._centik_durumu(t24, saat=105.0) == ("Codex %31", lc.AMBER, 1),
+                "çentik döngüsü t=5 sn'de Codex %31 (amber, nokta 1)")
+        kontrol(uyg._centik_durumu(t24, saat=110.0) == ("AGY %94", lc.YESIL, 2),
+                "çentik döngüsü t=10 sn'de AGY %94 (yeşil, nokta 2)")
+        kontrol(uyg._centik_durumu(t24, saat=115.0) == ("Claude %82", lc.YESIL, 0),
+                "çentik döngüsü t=15 sn'de başa sarar (Claude %82)")
+
+        # %17 (>=15 eşiği, <20 kırmızı): kritik kilide girmez, sırası gelince kırmızı olur
+        uyg.durum["codex"] = {"bes_saat": {"kalan": 17, "resets_at": t24 + 3600}}
+        uyg._centik_dongu_sifirla()
+        kontrol(uyg._centik_durumu(t24, saat=120.0) == ("Claude %82", lc.YESIL, 0)
+                and uyg._centik_durumu(t24, saat=125.0) == ("Codex %17", lc.KIRMIZI, 1)
+                and uyg._centik_durumu(t24, saat=130.0) == ("AGY %94", lc.YESIL, 2),
+                "%15-%19 arası araç kilitlemez, sırası gelince kırmızı vurgulanır")
+
+        # (b) Verisi olmayan aracı atlama, tek veri, sıfır veri
+        uyg.durum = {
+            "surum": 1,
+            "claude": {"bes_saat": {"kalan": 82, "resets_at": t24 + 3600}},
+            "antigravity": {"bes_saat": {"kalan": 94, "resets_at": t24 + 3600}},
+        }
+        uyg._centik_dongu_sifirla()
+        kontrol(uyg._centik_durumu(t24, saat=200.0) == ("Claude %82", lc.YESIL, 0)
+                and uyg._centik_durumu(t24, saat=205.0) == ("AGY %94", lc.YESIL, 2)
+                and uyg._centik_durumu(t24, saat=210.0) == ("Claude %82", lc.YESIL, 0),
+                "verisi olmayan Codex atlanır, aktif_nokta gerçek dizinde (0 -> 2 -> 0) kalır")
+
+        uyg.durum = {
+            "surum": 1,
+            "codex": {"bes_saat": {"kalan": 42, "resets_at": t24 + 3600}},
+        }
+        uyg._centik_dongu_sifirla()
+        kontrol(uyg._centik_gecis_durumu(t24, saat=220.0) == ("Codex %42", lc.AMBER, 1, None, 1.0)
+                and uyg._centik_gecis_durumu(t24, saat=225.1) == ("Codex %42", lc.AMBER, 1, None, 1.0),
+                "tek araçta veri varken geçişsiz sabit gösterilir")
+
+        uyg.durum = {"surum": 1}
+        uyg._centik_dongu_sifirla()
+        kontrol(uyg._centik_durumu(t24, saat=240.0) == (dil.t("centik_bos"), lc.VURGU, None)
+                and uyg._centik_gecis_durumu(t24, saat=240.0) == (dil.t("centik_bos"), lc.VURGU, None, None, 1.0),
+                "hiç veri yokken centik_bos, VURGU ve aktif_nokta=None döner")
+
+        # (c) Kritik kilit: 0% dolmuş (gelecek reset), <15%, öncelik sırası ve kritik geçince devam
+        uyg.durum = {
+            "surum": 1,
+            "claude": {"bes_saat": {"kalan": 0, "resets_at": t24 + 370}},
+            "codex": {"bes_saat": {"kalan": 31, "resets_at": t24 + 3600}},
+            "antigravity": {"bes_saat": {"kalan": 94, "resets_at": t24 + 3600}},
+        }
+        uyg._centik_dongu_sifirla()
+        kontrol(uyg._centik_durumu(t24, saat=300.0) == ("Claude 6dk", lc.KIRMIZI, 0)
+                and uyg._centik_durumu(t24, saat=306.0) == ("Claude 6dk", lc.KIRMIZI, 0),
+                "0% dolmuş araç çentiği kırmızı geri sayıma kilitler (döngü durur)")
+
+        uyg.durum["codex"] = {"bes_saat": {"kalan": 0, "resets_at": t24 + 190}}
+        kontrol(uyg._centik_durumu(t24, saat=310.0) == ("Codex 3dk", lc.KIRMIZI, 1),
+                "iki dolmuş araçta daha kısa resetli olan önceliklidir")
+
+        uyg.durum = {
+            "surum": 1,
+            "claude": {"bes_saat": {"kalan": 82, "resets_at": t24 + 3600}},
+            "codex": {"bes_saat": {"kalan": 12, "resets_at": t24 + 3600}},
+            "antigravity": {"bes_saat": {"kalan": 94, "resets_at": t24 + 3600}},
+        }
+        uyg._centik_dongu_sifirla()
+        kontrol(uyg._centik_durumu(t24, saat=320.0) == ("Codex %12", lc.KIRMIZI, 1)
+                and uyg._centik_durumu(t24, saat=326.0) == ("Codex %12", lc.KIRMIZI, 1),
+                "%15 altı kritik araç çentiği kırmızıya kilitler")
+
+        uyg.durum["codex"] = {"bes_saat": {"kalan": 65, "resets_at": t24 + 3600}}
+        kontrol(uyg._centik_durumu(t24, saat=330.0) == ("Claude %82", lc.YESIL, 0)
+                and uyg._centik_durumu(t24, saat=335.0) == ("Codex %65", lc.YESIL, 1)
+                and uyg._centik_durumu(t24, saat=340.0) == ("AGY %94", lc.YESIL, 2),
+                "kritik durum geçince 5 sn sırayla döngü yeniden başlar")
+
+        # (d) Yumuşak 0.35 sn geçiş interpolasyonu (gecis_t, onceki_metin, renk karışımı) ve centik_gorseli sözleşmesi
+        uyg.durum = {
+            "surum": 1,
+            "claude": {"bes_saat": {"kalan": 82, "resets_at": t24 + 3600}},
+            "codex": {"bes_saat": {"kalan": 31, "resets_at": t24 + 3600}},
+            "antigravity": {"bes_saat": {"kalan": 94, "resets_at": t24 + 3600}},
+        }
+        uyg._centik_dongu_sifirla()
+        g0 = uyg._centik_gecis_durumu(t24, saat=400.0)
+        g_ara = uyg._centik_gecis_durumu(t24, saat=405.15)
+        beklenen_t = lc.ease_out(0.15 / lc.CENTIK_GECIS_SN)
+        beklenen_renk = lc.renk_karistir(lc.YESIL, lc.AMBER, beklenen_t)
+        g_son = uyg._centik_gecis_durumu(t24, saat=405.40)
+        kontrol(g0 == ("Claude %82", lc.YESIL, 0, None, 1.0)
+                and g_ara[0] == "Codex %31"
+                and g_ara[1] == beklenen_renk
+                and g_ara[1] not in (lc.YESIL, lc.AMBER)
+                and g_ara[2] == 1
+                and g_ara[3] == "Claude %82"
+                and 0.0 < g_ara[4] < 1.0
+                and abs(g_ara[4] - beklenen_t) < 1e-6
+                and g_son == ("Codex %31", lc.AMBER, 1, None, 1.0),
+                "0.35 sn geçişte gecis_t (0..1), onceki_metin ve yeşil->amber renk karışımı doğru hesaplanır")
+
+        yakalanan_cizim = []
+
+        def sahte_centik_gorseli(*args, **kwargs):
+            yakalanan_cizim.append((args, kwargs))
+            return eski_d_centik_gorseli(*args, **kwargs)
+
+        lc.gm.centik_gorseli = sahte_centik_gorseli
+        uyg._centik_dongu_sifirla()
+        uyg._parlama_bitis = 0.0
+        uyg._centik_ciz(simdi=t24, saat=500.0)
+        uyg._centik_ciz(simdi=t24, saat=505.15)
+        uyg._centik_ciz(simdi=t24, saat=505.40)
+        kontrol(len(yakalanan_cizim) >= 3
+                and yakalanan_cizim[-3][1].get("aktif_nokta") == 0
+                and yakalanan_cizim[-3][1].get("onceki_metin") is None
+                and yakalanan_cizim[-3][1].get("gecis_t") == 1.0
+                and yakalanan_cizim[-2][1].get("aktif_nokta") == 1
+                and yakalanan_cizim[-2][1].get("onceki_metin") == "Claude %82"
+                and 0.0 < yakalanan_cizim[-2][1].get("gecis_t", 0.0) < 1.0
+                and yakalanan_cizim[-2][1].get("vurgu_renk") == beklenen_renk
+                and yakalanan_cizim[-1][1].get("aktif_nokta") == 1
+                and yakalanan_cizim[-1][1].get("onceki_metin") is None
+                and yakalanan_cizim[-1][1].get("gecis_t") == 1.0
+                and yakalanan_cizim[-1][1].get("vurgu_renk") == lc.AMBER,
+                "_centik_ciz aktif_nokta, onceki_metin, gecis_t ve karışık vurgu_renk ile centik_gorseli çağırır")
+
+        # (e) centik_dongu ayarı (kapat/aç), kalıcılık, savunmacı bool dönüşümü ve TR/EN dil anahtarları
+        uyg.durum["centik_dongu"] = 0
+        kontrol(not uyg._centik_dongu_acik(), "centik_dongu bool olmayan değerde (0) savunmacı False olur")
+        uyg.durum["centik_dongu"] = 1
+        kontrol(uyg._centik_dongu_acik(), "centik_dongu bool olmayan değerde (1) savunmacı True olur")
+
+        uyg.centik_dongu_ayarla(False)
+        kontrol(uyg.durum.get("centik_dongu") is False
+                and ortak.oku().get("centik_dongu") is False
+                and uyg._centik_durumu(t24, saat=600.0) == ("Codex %31", lc.AMBER, 1)
+                and uyg._centik_durumu(t24, saat=605.0) == ("Codex %31", lc.AMBER, 1)
+                and uyg._centik_durumu(t24, saat=610.0) == ("Codex %31", lc.AMBER, 1),
+                "centik_dongu=False durum.json'a kaydedilir ve klasik en düşük araç moduna döner")
+
+        uyg.centik_dongu_ayarla(True)
+        kontrol(uyg.durum.get("centik_dongu") is True
+                and ortak.oku().get("centik_dongu") is True
+                and uyg._centik_durumu(t24, saat=700.0) == ("Claude %82", lc.YESIL, 0)
+                and uyg._centik_durumu(t24, saat=705.0) == ("Codex %31", lc.AMBER, 1),
+                "centik_dongu=True durum.json'a kaydedilir ve 5 sn döngü tekrar açılır")
+
+        kontrol(dil.METINLER["tr"].get("menu_centik_dongu") == "Çentikte sırayla göster"
+                and dil.METINLER["en"].get("menu_centik_dongu") == "Cycle tools in notch",
+                "dil.py TR ve EN menu_centik_dongu anahtarları eksiksiz")
+    finally:
+        lc.gm.centik_gorseli = eski_d_centik_gorseli
+        ortak.yaz(eski_d_disk)
+        uyg.durum = eski_d_durum
+        uyg.araclari_degistir(eski_d_araclar)
+        uyg._centik_dongu_sifirla()
+        bekle(0.05)
+
     # Gerçek ikinci süreç -> izole Windows event -> çalışan Tk paneli.
     with patch.dict(os.environ, {"LIMIT_CUBUGU_ORNEK_ADI": "LimitCubuguArayuzTest_" + uuid.uuid4().hex}):
         try:
@@ -958,3 +1141,8 @@ print()
 print("SONUÇ:", "BAŞARILI" if not hatalar else f"{len(hatalar)} HATA: {hatalar}")
 if hatalar:  # başarıda çıkış yapma: unittest discover modülü içe aktarabilsin
     sys.exit(1)
+
+
+class TestArayuzKontrolleri(unittest.TestCase):
+    def test_arayuz_adimlari_basarili(self):
+        self.assertEqual(hatalar, [])

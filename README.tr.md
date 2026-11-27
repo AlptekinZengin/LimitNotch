@@ -25,12 +25,12 @@ Konsolsuz başlatmak için `baslat.vbs` veya `Limit-Cubugu.cmd` dosyalarını da
 
 ## Kullanım
 
-- **Üst orta çentik:** Seçili monitörün en üst ortasında (~168×24 px) durur; araç durum noktalarını ve en düşük kalan kotayı (dolmuşsa kalan süreyi) gösterir. Fareyle üzerine gelince (~180 ms) veya tıklayınca açılır.
+- **Üst orta çentik:** Seçili monitörün en üst ortasında (~168×24 px) durur; etkin araçlar arasında 5 saniyede bir sırayla geçer, araca göre yumuşak renk/yazı geçişi yapar ve aktif noktayı vurgular. Herhangi bir araç %15'in altına düşerse veya dolarsa (geri sayım göstererek) o kritik araca kilitlenir. Fareyle üzerine gelince (~180 ms) veya tıklayınca açılır.
 - **Global kısayol (`Alt + X`):** Herhangi bir uygulamadayken paneli açar/kapatır.
 - **Yatay kapsül:** Her araç için iki halka gösterir (dış = 5 saatlik/birincil, iç = haftalık/ikincil).
   Renkler: yeşil `%50+` · amber `%20–49` · kırmızı `< %20` · gri `veri yok`.
 - **Detay kartı:** Simgenin üzerine gelince kalan yüzdeleri, canlı geri sayımı, yenilenme tarihini ve notları gösterir; karttaki **Yenile** yalnız o aracı tazeler.
-- **Sağ tık menüsü:** Panelde sağ tıklayarak araçları seçebilir (**Araçları seç…**) veya dili değiştirebilirsiniz (**Dil / Language → Türkçe / English**). Başlangıçta Windows arayüz dilini otomatik algılar.
+- **Sağ tık menüsü:** Çentikte veya panelde sağ tıklayarak sıralı çentik geçişini açıp kapatabilir (**Çentikte sırayla göster**), araçları seçebilir (**Araçları seç…**) veya dili değiştirebilirsiniz (**Dil / Language → Türkçe / English**). Başlangıçta Windows arayüz dilini otomatik algılar.
 - **Sabit / Ekran / Çıkış:** Paneli açık sabitleyin, monitörler arasında geçin veya uygulamayı kapatın.
 
 ## Desteklenen Araçlar

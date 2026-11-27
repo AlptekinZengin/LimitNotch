@@ -1,11 +1,12 @@
 """gorsel_motor.py birim testleri, performans kontrolü ve 4 önizleme PNG üretimi."""
+import inspect
 import math
 import os
 import sys
 import time
 import unittest
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 os.environ["LIMITNOTCH_DIL"] = "tr"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -63,6 +64,158 @@ class TestGorselMotor(unittest.TestCase):
             tarama_faz=0.35,
         )
         self.assertEqual(img.size, (168, 24))
+
+    def test_centik_imza_ve_geriye_uyumluluk(self):
+        sig = inspect.signature(gm.centik_gorseli)
+        self.assertEqual(
+            list(sig.parameters.keys()),
+            [
+                "w",
+                "h",
+                "noktalar",
+                "metin",
+                "vurgu_renk",
+                "nefes",
+                "tarama_faz",
+                "aktif_nokta",
+                "onceki_metin",
+                "gecis_t",
+            ],
+        )
+        self.assertIsNone(sig.parameters["aktif_nokta"].default)
+        self.assertIsNone(sig.parameters["onceki_metin"].default)
+        self.assertEqual(sig.parameters["gecis_t"].default, 1.0)
+
+        img_eski = gm.centik_gorseli(
+            168, 24, [gm.YESIL, gm.AMBER, gm.YESIL], "Claude %82", gm.YESIL, nefes=0.6
+        )
+        img_varsayilan = gm.centik_gorseli(
+            168,
+            24,
+            [gm.YESIL, gm.AMBER, gm.YESIL],
+            "Claude %82",
+            gm.YESIL,
+            nefes=0.6,
+            tarama_faz=None,
+            aktif_nokta=None,
+            onceki_metin=None,
+            gecis_t=1.0,
+        )
+        self.assertEqual(img_eski.tobytes(), img_varsayilan.tobytes())
+
+    def test_centik_aktif_nokta_gorsel_fark(self):
+        noktalar = [gm.YESIL, gm.AMBER, gm.YESIL]
+        img_none = gm.centik_gorseli(168, 24, noktalar, "Claude %82", gm.YESIL, nefes=0.6, aktif_nokta=None)
+        img_0 = gm.centik_gorseli(168, 24, noktalar, "Claude %82", gm.YESIL, nefes=0.6, aktif_nokta=0)
+        img_1 = gm.centik_gorseli(168, 24, noktalar, "Claude %82", gm.YESIL, nefes=0.6, aktif_nokta=1)
+        img_2 = gm.centik_gorseli(168, 24, noktalar, "Claude %82", gm.YESIL, nefes=0.6, aktif_nokta=2)
+
+        for idx_a, a in (("none", img_none), ("0", img_0), ("1", img_1), ("2", img_2)):
+            for idx_b, b in (("none", img_none), ("0", img_0), ("1", img_1), ("2", img_2)):
+                if idx_a < idx_b:
+                    diff = ImageChops.difference(a.convert("RGB"), b.convert("RGB"))
+                    self.assertIsNotNone(diff.getbbox(), f"aktif_nokta={idx_a} ve {idx_b} aynı çıktı")
+
+        # Aktif nokta kendi merkezinde pasif hâlinden daha parlak olmalı
+        def _parlaklik(img, x, y):
+            r, g, b, _ = img.getpixel((x, y))
+            return r + g + b
+
+        # 3 nokta merkezleri (~16, ~26.5 -> 27, ~37), y ~ 11
+        self.assertGreater(_parlaklik(img_0, 16, 11), _parlaklik(img_1, 16, 11))
+        self.assertGreater(_parlaklik(img_1, 27, 11), _parlaklik(img_0, 27, 11))
+        self.assertGreater(_parlaklik(img_2, 37, 11), _parlaklik(img_0, 37, 11))
+
+    def test_centik_metin_gecis_crossfade(self):
+        noktalar = [gm.YESIL, gm.AMBER, gm.YESIL]
+        img_eski_statik = gm.centik_gorseli(168, 24, noktalar, "Claude %82", gm.YESIL, nefes=0.6, aktif_nokta=0)
+        img_yeni_statik = gm.centik_gorseli(168, 24, noktalar, "Codex %31", gm.AMBER, nefes=0.6, aktif_nokta=1)
+
+        img_t0 = gm.centik_gorseli(
+            168, 24, noktalar, "Codex %31", gm.YESIL, nefes=0.6, aktif_nokta=0,
+            onceki_metin="Claude %82", gecis_t=0.0,
+        )
+        img_t05 = gm.centik_gorseli(
+            168, 24, noktalar, "Codex %31", "#98C95F", nefes=0.6, aktif_nokta=1,
+            onceki_metin="Claude %82", gecis_t=0.5,
+        )
+        img_t1 = gm.centik_gorseli(
+            168, 24, noktalar, "Codex %31", gm.AMBER, nefes=0.6, aktif_nokta=1,
+            onceki_metin="Claude %82", gecis_t=1.0,
+        )
+
+        # t=0.0 önceki metinle, t=1.0 yeni metinle bire bir eşleşmeli
+        self.assertEqual(img_t0.tobytes(), img_eski_statik.tobytes())
+        self.assertEqual(img_t1.tobytes(), img_yeni_statik.tobytes())
+
+        # t=0.5 hem t=0.0 hem t=1.0'dan farklı ara kare olmalı ve metin alanı tam opak kalmalı
+        metin_bolgesi = (52, 2, 160, 20)
+        diff_05_0 = ImageChops.difference(
+            img_t05.crop(metin_bolgesi).convert("RGB"),
+            img_t0.crop(metin_bolgesi).convert("RGB"),
+        )
+        diff_05_1 = ImageChops.difference(
+            img_t05.crop(metin_bolgesi).convert("RGB"),
+            img_t1.crop(metin_bolgesi).convert("RGB"),
+        )
+        self.assertIsNotNone(diff_05_0.getbbox())
+        self.assertIsNotNone(diff_05_1.getbbox())
+        for x in range(56, 152, 8):
+            self.assertEqual(img_t05.getpixel((x, 11))[3], 255, f"Metin alanında şeffaf delik: x={x}")
+
+    def test_centik_harmanlanmis_vurgu_renk(self):
+        noktalar = [gm.YESIL, gm.AMBER, gm.YESIL]
+        img_yesil = gm.centik_gorseli(168, 24, noktalar, "Claude %82", gm.YESIL, nefes=0.8)
+        img_ara = gm.centik_gorseli(168, 24, noktalar, "Codex %31", "#98c95f", nefes=0.8)
+        img_amber = gm.centik_gorseli(168, 24, noktalar, "Codex %31", gm.AMBER, nefes=0.8)
+
+        # Alt vurgu çizgisi pikseli (x=84, y=22) her üç renkte farklı ve ara renk ortada olmalı
+        py = img_yesil.getpixel((84, 22))
+        pm = img_ara.getpixel((84, 22))
+        pa = img_amber.getpixel((84, 22))
+        self.assertNotEqual(py, pm)
+        self.assertNotEqual(pm, pa)
+        self.assertGreater(pm[0], py[0])
+        self.assertLess(pm[0], pa[0])
+
+    def test_centik_gecersiz_parametre_guvenligi(self):
+        noktalar = [gm.YESIL, gm.AMBER, gm.KIRMIZI]
+        img_baz = gm.centik_gorseli(168, 24, noktalar, "AGY %94", gm.YESIL, nefes=0.5)
+
+        # Sınır dışı veya geçersiz aktif_nokta hata vermeden varsayılan görünüme düşmeli
+        for gecersiz_idx in (-1, -99, 3, 100, True, False, "abc"):
+            with self.subTest(aktif_nokta=gecersiz_idx):
+                img = gm.centik_gorseli(
+                    168, 24, noktalar, "AGY %94", gm.YESIL, nefes=0.5, aktif_nokta=gecersiz_idx
+                )
+                self.assertEqual(img.size, (168, 24))
+                self.assertEqual(img.tobytes(), img_baz.tobytes())
+
+        # Sınır dışı veya NaN/Inf gecis_t güvenli kırpılmalı
+        img_onceki = gm.centik_gorseli(168, 24, noktalar, "Claude %82", gm.YESIL, nefes=0.5)
+        for t_alt in (-0.5, -10.0):
+            with self.subTest(gecis_t=t_alt):
+                img = gm.centik_gorseli(
+                    168, 24, noktalar, "AGY %94", gm.YESIL, nefes=0.5,
+                    onceki_metin="Claude %82", gecis_t=t_alt,
+                )
+                self.assertEqual(img.tobytes(), img_onceki.tobytes())
+
+        for t_ust in (1.5, 99.0, float("nan"), float("inf"), float("-inf")):
+            with self.subTest(gecis_t=t_ust):
+                img = gm.centik_gorseli(
+                    168, 24, noktalar, "AGY %94", gm.YESIL, nefes=0.5,
+                    onceki_metin="Claude %82", gecis_t=t_ust,
+                )
+                self.assertEqual(img.tobytes(), img_baz.tobytes())
+
+        # Boş nokta listesi + bozuk hex renk + boş metin de hatasız çizilmeli
+        img_bos = gm.centik_gorseli(
+            168, 24, [], "", vurgu_renk="#ZZZZZZ", nefes=float("nan"),
+            aktif_nokta=0, onceki_metin="", gecis_t=0.5,
+        )
+        self.assertEqual(img_bos.size, (168, 24))
+        self.assertEqual(img_bos.mode, "RGBA")
 
     def test_panel_hitboxes_ve_durumlar(self):
         araclar = {

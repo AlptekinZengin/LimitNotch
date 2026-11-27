@@ -25,12 +25,12 @@ You can also launch without a console window via `baslat.vbs` or `Limit-Cubugu.c
 
 ## Usage
 
-- **Top-center notch:** Sits at the top center of the selected monitor (~168×24 px), showing status dots and the lowest remaining quota (or countdown if exhausted). Hover (~180 ms) or click to expand.
+- **Top-center notch:** Sits at the top center of the selected monitor (~168×24 px), cycling sequentially through active tools every 5 seconds with smooth per-tool color/text transitions and an active dot highlight. If any tool drops below 15% or hits 0% (showing countdown), the notch locks onto that critical tool. Hover (~180 ms) or click to expand.
 - **Global shortcut (`Alt + X`):** Toggles the capsule open/closed from any application.
 - **Expanded panel:** Shows dual concentric progress rings per tool (outer = primary/5-hour, inner = weekly/secondary).
   Colors: green `>= 50%` · amber `20%–49%` · red `< 20%` · gray `no data`.
 - **Detail card:** Hover over any tool icon to inspect exact percentages, progress bars, live countdowns, reset dates, and status notes, or click **Refresh** for that single tool.
-- **Right-click menu:** Right-click the panel to select active tools (**Select tools…**) or switch the UI language (**Dil / Language → Türkçe / English**). Language defaults to your Windows display language.
+- **Right-click menu:** Right-click the notch or panel to toggle sequential notch cycling (**Cycle tools in notch**), select active tools (**Select tools…**), or switch the UI language (**Dil / Language → Türkçe / English**). Language defaults to your Windows display language.
 - **Pin / Display / Quit:** Keep the panel open, cycle across monitors, or exit cleanly.
 
 ## Supported Tools
